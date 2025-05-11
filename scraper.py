@@ -1,16 +1,19 @@
 import argparse
+import random
 import re
+import time
 import requests
 import pandas
 
-ORIGINAL_COLUMNS = {
+ORIGINAL_COLUMNS = [
     'Parcel Number',
     'Account Number',
-    'Owner,Amount',
+    'Owner',
+    'Amount',
     'GIS Map Hyperlink'
-}
+]
 
-GEOCORTEX_KEYS = {
+GEOCORTEX_KEYS = [
     "PARCEL",
     "PARCEL_SIZE",
     "UNIT_TYPE",
@@ -51,7 +54,7 @@ GEOCORTEX_KEYS = {
     "TAX_YEAR",
     "TWN_RNG_SEC",
     "BOS_DISTRICT"
-}
+]
 
 BASE_PARAMS = {
     "f": "json",
@@ -75,20 +78,23 @@ def get_geocortex_data(url):
     resp.raise_for_status()
     data = resp.json()
     attrs = data['features'][0]['attributes'] if data.get('features') else {}
-
-    # filter to only the keys we care about
-    return { key: attrs.get(key) for key in GEOCORTEX_KEYS }
+    values = { key: attrs.get(key) for key in GEOCORTEX_KEYS}
+    if not all(value is None for value in values.values()):
+        return values
+    return False
 
 def write_csv_row(original_data, geocortex_data, f):
-    # Write original columns in order
     for col in ORIGINAL_COLUMNS:
         val = original_data.get(col, '')
+        if col == 'Parcel Number':
+            val = str(val).strip()
+        elif col == 'Owner':
+            val = str(val).rstrip()
+            
         f.write(f"{val},")
 
-    # Write geocortex data in order
     for i, key in enumerate(GEOCORTEX_KEYS):
         val = geocortex_data.get(key, '')
-        # ensure no commas break our CSV
         text = str(val).replace(',', '')  
         end = '\n' if i == len(GEOCORTEX_KEYS) - 1 else ','
         f.write(f"{text}{end}")
@@ -99,9 +105,10 @@ def prepare_output_csv(f):
         f.write(f'{name},')
     for index,name in enumerate(GEOCORTEX_KEYS):
         if index == len(GEOCORTEX_KEYS) - 1:
-            f.write(f'{name}\n')
+            f.write(f'{name}')
         else:
             f.write(f'{name},')
+    f.write('\n')
 
 def get_output_csv(output_csv_name):
     return open(output_csv_name,'w')
@@ -111,13 +118,15 @@ def get_input_csv(input_csv_name):
 
 def parse_input_csv(input_csv: pandas.DataFrame, output_file):
     for index, row in input_csv.iterrows():
-        print(index + 1 % 5)
-        if (index + 1 % 5 == 0):
+        if (index % 10 == 0 and index != 0):
             print(f"Processed {index} rows")
-            break
 
         geo = get_geocortex_data(row['GIS Map Hyperlink'])
+        if not geo:
+            print(f"Failed to fetch data for row: {index}")
+            continue
         write_csv_row(row, geo, output_file)
+        time.sleep(random.uniform(0,3))
 
 def main():
     parser = argparse.ArgumentParser(description="Parse property CSV data.")
